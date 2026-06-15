@@ -4,7 +4,7 @@ import { playSound } from './SoundController';
 import { ChevronRight, Database, Folder, Bookmark } from 'lucide-react';
 
 export const Breadcrumbs = () => {
-  const { tree, activeNote, audioEnabled } = useNotesStore();
+  const { tree, activeNote, audioEnabled, fetchNote } = useNotesStore();
 
   if (!activeNote) {
     return (
@@ -21,12 +21,15 @@ export const Breadcrumbs = () => {
   let subtopicName = '';
 
   const subject = tree.find(s => s.id === activeNote.subject_id);
+  let topic = null;
+  let subtopic = null;
+
   if (subject) {
     subjectName = subject.title;
-    const topic = subject.topics?.find(t => t.id === activeNote.topic_id);
+    topic = subject.topics?.find(t => t.id === activeNote.topic_id);
     if (topic) {
       topicName = topic.title;
-      const subtopic = topic.subtopics?.find(st => st.id === activeNote.subtopic_id);
+      subtopic = topic.subtopics?.find(st => st.id === activeNote.subtopic_id);
       if (subtopic) {
         subtopicName = subtopic.title;
       }
@@ -37,9 +40,110 @@ export const Breadcrumbs = () => {
     playSound('hover', audioEnabled);
   };
 
+  const normalizeText = (str) => {
+    return str ? str.toLowerCase().replace(/[\s_-]/g, '') : '';
+  };
+
+  const titleMatches = (a, b) => {
+    return normalizeText(a) === normalizeText(b);
+  };
+
+  const handleSubjectClick = () => {
+    if (!subject) return;
+    playSound('select', audioEnabled);
+    
+    // Find note matching subject title
+    let targetNote = null;
+    const searchNote = (notes) => {
+      return notes?.find(n => titleMatches(n.title, subject.title));
+    };
+
+    for (const t of (subject.topics || [])) {
+      const match = searchNote(t.notes);
+      if (match) { targetNote = match; break; }
+      for (const st of (t.subtopics || [])) {
+        const subMatch = searchNote(st.notes);
+        if (subMatch) { targetNote = subMatch; break; }
+      }
+      if (targetNote) break;
+    }
+
+    if (!targetNote) {
+      for (const t of (subject.topics || [])) {
+        if (t.notes && t.notes.length > 0) {
+          targetNote = t.notes[0];
+          break;
+        }
+        for (const st of (t.subtopics || [])) {
+          if (st.notes && st.notes.length > 0) {
+            targetNote = st.notes[0];
+            break;
+          }
+        }
+        if (targetNote) break;
+      }
+    }
+
+    if (targetNote) {
+      fetchNote(targetNote.id);
+    }
+  };
+
+  const handleTopicClick = () => {
+    if (!topic) return;
+    playSound('select', audioEnabled);
+
+    // Find note matching topic title
+    let targetNote = topic.notes?.find(n => titleMatches(n.title, topic.title));
+
+    if (!targetNote) {
+      for (const st of (topic.subtopics || [])) {
+        const match = st.notes?.find(n => titleMatches(n.title, topic.title));
+        if (match) { targetNote = match; break; }
+      }
+    }
+
+    if (!targetNote) {
+      if (topic.notes && topic.notes.length > 0) {
+        targetNote = topic.notes[0];
+      } else {
+        for (const st of (topic.subtopics || [])) {
+          if (st.notes && st.notes.length > 0) {
+            targetNote = st.notes[0];
+            break;
+          }
+        }
+      }
+    }
+
+    if (targetNote) {
+      fetchNote(targetNote.id);
+    }
+  };
+
+  const handleSubtopicClick = () => {
+    if (!subtopic) return;
+    playSound('select', audioEnabled);
+
+    // Find note matching subtopic title
+    let targetNote = subtopic.notes?.find(n => titleMatches(n.title, subtopic.title));
+
+    if (!targetNote && subtopic.notes && subtopic.notes.length > 0) {
+      targetNote = subtopic.notes[0];
+    }
+
+    if (targetNote) {
+      fetchNote(targetNote.id);
+    }
+  };
+
   return (
     <nav className="flex flex-wrap items-center gap-1.5 py-3 px-4 font-cyber text-xs tracking-widest text-[#a8aabd] border-b border-cyber-border/40 bg-cyber-dark/40">
       <div 
+        onClick={() => {
+          playSound('select', audioEnabled);
+          useNotesStore.setState({ activeNote: null, activeNoteId: null });
+        }}
         className="flex items-center space-x-1 cursor-pointer hover:text-cyber-cyan transition-colors"
         onMouseEnter={handleHover}
       >
@@ -51,7 +155,8 @@ export const Breadcrumbs = () => {
         <>
           <ChevronRight className="w-3.5 h-3.5 text-cyber-border" />
           <div 
-            className="flex items-center space-x-1 cursor-default hover:text-white transition-colors"
+            onClick={handleSubjectClick}
+            className="flex items-center space-x-1 cursor-pointer hover:text-cyber-cyan transition-colors"
             onMouseEnter={handleHover}
           >
             <Folder className="w-3.5 h-3.5 text-cyber-cyan" />
@@ -64,7 +169,8 @@ export const Breadcrumbs = () => {
         <>
           <ChevronRight className="w-3.5 h-3.5 text-cyber-border" />
           <div 
-            className="flex items-center space-x-1 cursor-default hover:text-white transition-colors"
+            onClick={handleTopicClick}
+            className="flex items-center space-x-1 cursor-pointer hover:text-cyber-cyan transition-colors"
             onMouseEnter={handleHover}
           >
             <Folder className="w-3.5 h-3.5 text-cyber-purple" />
@@ -77,7 +183,8 @@ export const Breadcrumbs = () => {
         <>
           <ChevronRight className="w-3.5 h-3.5 text-cyber-border" />
           <div 
-            className="flex items-center space-x-1 cursor-default hover:text-white transition-colors"
+            onClick={handleSubtopicClick}
+            className="flex items-center space-x-1 cursor-pointer hover:text-cyber-cyan transition-colors"
             onMouseEnter={handleHover}
           >
             <Folder className="w-3.5 h-3.5 text-cyber-pink" />
