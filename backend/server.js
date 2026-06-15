@@ -499,12 +499,19 @@ app.get('/api/notes/:id/export/:format', async (req, res) => {
 // 12. Serve Compiled Frontend Assets
 // ==========================================
 const frontendDist = join(__dirname, '../frontend/dist');
-if (fs.existsSync(frontendDist)) {
-  app.use(express.static(frontendDist));
-  app.get('*', (req, res) => {
-    res.sendFile(join(frontendDist, 'index.html'));
-  });
-}
+console.log(`[SYSTEM] Client Asset Directory: ${frontendDist}`);
+console.log(`[SYSTEM] Client Asset Directory Exists: ${fs.existsSync(frontendDist)}`);
+
+app.use(express.static(frontendDist));
+app.get('*', (req, res) => {
+  const indexPath = join(frontendDist, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    console.error(`[ERROR] Static index.html not found at: ${indexPath}`);
+    res.status(404).send('NeuroNotes Client bundle (index.html) not found in directory.');
+  }
+});
 
 // Start Express Listener
 app.listen(PORT, () => {

@@ -97,7 +97,7 @@ export const App = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col relative overflow-hidden bg-cyber-bg text-slate-200">
+    <div className="h-screen flex flex-col relative overflow-hidden bg-cyber-bg text-slate-200">
       
       {/* 1. Holographic Matrix Rain background */}
       <MatrixBackground />

@@ -1,5 +1,8 @@
 import pkg from 'pg';
 import dotenv from 'dotenv';
+import sqlite3 from 'sqlite3';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
@@ -14,8 +17,44 @@ const pool = new Pool({
   ssl: isProduction ? { rejectUnauthorized: false } : false
 });
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const dbPath = join(__dirname, 'neuronotes.db');
+
+let sqliteDb = null;
+export let useSqlite = false;
+
+// Probe PostgreSQL connection at startup
+try {
+  if (connectionString) {
+    const client = await Promise.race([
+      pool.connect(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('PostgreSQL connection timed out (2s)')), 2000))
+    ]);
+    client.release();
+    console.log('PostgreSQL connection verified.');
+  } else {
+    console.log('No DATABASE_URL configured. Using SQLite.');
+    useSqlite = true;
+  }
+} catch (err) {
+  console.warn('PostgreSQL connection failed, falling back to SQLite. Error:', err.message);
+  useSqlite = true;
+}
+
+if (useSqlite) {
+  sqliteDb = new sqlite3.Database(dbPath, (err) => {
+    if (err) {
+      console.error('Could not connect to SQLite database:', err.message);
+    } else {
+      console.log(`Connected to SQLite database at: ${dbPath}`);
+    }
+  });
+}
+
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle PostgreSQL client:', err);
+  if (!useSqlite) {
+    console.error('Unexpected error on idle PostgreSQL client:', err);
+  }
 });
 
 // Helper regex to convert SQLite parameter placeholders "?" into PostgreSQL "$1, $2, etc."
@@ -24,8 +63,33 @@ export const translateSql = (sql) => {
   return sql.replace(/\?/g, () => `$${index++}`);
 };
 
+// Helper to convert PostgreSQL queries to SQLite compatibility
+const translateSqlToSqlite = (sql) => {
+  return sql
+    .replace(/\bSERIAL\s+PRIMARY\s+KEY\b/gi, 'INTEGER PRIMARY KEY AUTOINCREMENT')
+    .replace(/\bVARCHAR\(\d+\)/gi, 'TEXT')
+    .replace(/\bTIMESTAMP\b/gi, 'DATETIME')
+    .replace(/\bILIKE\b/gi, 'LIKE');
+};
+
 // SQLite syntax translation wrapper for dbRun (Inserts/Updates/Deletes)
 export const dbRun = async (sql, params = []) => {
+  if (useSqlite) {
+    const sqliteSql = translateSqlToSqlite(sql);
+    return new Promise((resolve, reject) => {
+      sqliteDb.run(sqliteSql, params, function (err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve({
+            lastID: this.lastID,
+            changes: this.changes
+          });
+        }
+      });
+    });
+  }
+
   let pgSql = translateSql(sql);
   const trimmed = pgSql.trim().toUpperCase();
 
@@ -49,6 +113,16 @@ export const dbRun = async (sql, params = []) => {
 
 // SQLite syntax translation wrapper for dbGet (Single Row)
 export const dbGet = async (sql, params = []) => {
+  if (useSqlite) {
+    const sqliteSql = translateSqlToSqlite(sql);
+    return new Promise((resolve, reject) => {
+      sqliteDb.get(sqliteSql, params, (err, row) => {
+        if (err) reject(err);
+        else resolve(row || null);
+      });
+    });
+  }
+
   const pgSql = translateSql(sql);
   const result = await pool.query(pgSql, params);
   return result.rows[0] || null;
@@ -56,6 +130,16 @@ export const dbGet = async (sql, params = []) => {
 
 // SQLite syntax translation wrapper for dbAll (Multiple Rows)
 export const dbAll = async (sql, params = []) => {
+  if (useSqlite) {
+    const sqliteSql = translateSqlToSqlite(sql);
+    return new Promise((resolve, reject) => {
+      sqliteDb.all(sqliteSql, params, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+  }
+
   const pgSql = translateSql(sql);
   const result = await pool.query(pgSql, params);
   return result.rows;
@@ -147,10 +231,10 @@ export const initDatabase = async () => {
       )
     `);
 
-    console.log('PostgreSQL database tables successfully initialized or checked.');
+    console.log(`${useSqlite ? 'SQLite' : 'PostgreSQL'} database tables successfully initialized or checked.`);
     await seedInitialData();
   } catch (error) {
-    console.error('Error initializing PostgreSQL database:', error);
+    console.error(`Error initializing ${useSqlite ? 'SQLite' : 'PostgreSQL'} database:`, error);
   }
 };
 
@@ -162,7 +246,7 @@ const seedInitialData = async () => {
     return;
   }
 
-  console.log('Seeding initial Cyberpunk knowledge database into PostgreSQL...');
+  console.log(`Seeding initial Cyberpunk knowledge database into ${useSqlite ? 'SQLite' : 'PostgreSQL'}...`);
 
   // Subject 1: Neural Protocols
   const subj1 = await dbRun('INSERT INTO subjects (title) VALUES (?)', ['Neural Protocols']);
@@ -271,7 +355,7 @@ An overview of high-end hardware specifications for modern Netrunners:
   await dbRun('INSERT INTO note_versions (note_id, content) VALUES (?, ?)', [note2.lastID, note2Content]);
   await dbRun('INSERT INTO recent_notes (note_id) VALUES (?)', [note2.lastID]);
 
-  console.log('Seed into PostgreSQL completed successfully.');
+  console.log(`Seed into ${useSqlite ? 'SQLite' : 'PostgreSQL'} completed successfully.`);
 };
 
 export default pool;
